@@ -1,0 +1,30 @@
+# global parameters
+project_name: 'pretrain_text_dedup_cn_科技_科学研究01'
+# 旧的需要保留的放在前面，新的数据代去重的路径(dir or file)放在第二个位置
+dataset_path: ['/apdcephfs_cq8/share_2906397/users/wangkuang/pipeline_demo/preprocess_step_output/test_data/chinese/filtered.jsonl', '/apdcephfs_cq8/share_2906397/users/wangkuang/pipeline_demo/test_data/chinese']  # path to your dataset directory or file
+suffixes: ['jsonl']
+ds_cache_dir: "/data/ds_cache_dir"
+temp_dir: "/data/ds_temp_dir"
+text_keys: 'raw_content'   
+# 新去重后剩余的数据放置的位置
+export_path: '/apdcephfs_cq8/share_2906397/users/wangkuang/pipeline_demo/dedup_step_output/test_data/chinese'
+
+np: 96
+open_tracer: false
+open_monitor: false
+use_cache: false
+executor_type: 'ray'  # 将执行器类型设置为 "ray"
+ray_address: 'auto'  # 设置为自动 Ray 地址
+
+
+# process schedule
+process:
+  - ray_bts_minhash_deduplicator: # 9873214
+      tokenization: character
+      window_size: 4  # small window size for short texts
+      lowercase: true
+      ignore_pattern: '\p{P}'
+      num_blocks: 10
+      hamming_distance: 8  # larger hamming distance threshold for short texts
+  - general_field_filter:
+      filter_condition: "tag > 0"
