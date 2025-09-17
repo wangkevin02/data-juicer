@@ -8,7 +8,6 @@ import pyarrow
 from jsonargparse import Namespace
 from loguru import logger
 
-from data_juicer import cuda_device_count
 from data_juicer.core.data import DJDataset
 from data_juicer.core.data.schema import Schema
 from data_juicer.ops import Deduplicator, Filter, Mapper
@@ -17,6 +16,7 @@ from data_juicer.utils.constant import Fields
 from data_juicer.utils.file_utils import is_remote_path
 from data_juicer.utils.lazy_loader import LazyLoader
 from data_juicer.utils.process_utils import calculate_np
+from data_juicer.utils.resource_utils import cuda_device_count
 from data_juicer.utils.webdataset_utils import _custom_default_decoder
 
 ray = LazyLoader("ray")
@@ -90,8 +90,50 @@ def filter_batch(batch, filter_func):
 
 class RayDataset(DJDataset):
     def __init__(self, dataset: ray.data.Dataset, dataset_path: str = None, cfg: Optional[Namespace] = None) -> None:
-        self.data = preprocess_dataset(dataset, dataset_path, cfg)
+        if cfg is not None:
+            self.data = preprocess_dataset(dataset, dataset_path, cfg)
+        else:
+            self.data = dataset
+        self.dataset_path = dataset_path
         self.num_proc = getattr(cfg, "np", getattr(cfg, "num_proc", None)) if cfg else None
+
+    def union(self, *other_datasets: "RayDataset") -> "RayDataset":
+        """
+        Returns a new RayDataset that is the union of this dataset and others.
+        
+        This operation is equivalent to a vertical concatenation. All datasets
+        must have the exact same schema (column names and types).
+
+        Args:
+            *other_datasets: A variable number of other RayDataset objects
+                             to union with this one.
+
+        Returns:
+            A new RayDataset instance containing the combined data.
+
+        Raises:
+            TypeError: If any of the provided arguments is not a RayDataset.
+            Ray exceptions: If the schemas of the datasets do not match.
+        """
+        if not other_datasets:
+            return self # Return self if no other datasets are provided
+
+        # 1. Validate that all inputs are RayDataset instances and extract the underlying data
+        underlying_ray_datasets = []
+        dataset_paths = [self.dataset_path]
+        for ds in other_datasets:
+            if not isinstance(ds, RayDataset):
+                raise TypeError(f"All datasets to union must be of type RayDataset, but got {type(ds)}")
+            underlying_ray_datasets.append(ds.data)
+            dataset_paths.append(ds.dataset_path)
+
+        # 2. Call the core Ray union method using the unwrapped datasets
+        unioned_data = self.data.union(*underlying_ray_datasets)
+
+        # 3. Wrap the result in a new RayDataset instance and return it.
+        #    The new dataset inherits the config from the first dataset.
+        #    The path is ambiguous after a union, so we set it to None.
+        return RayDataset(dataset=unioned_data, dataset_path=dataset_paths)
 
     def schema(self) -> Schema:
         """Get dataset schema.
@@ -286,11 +328,30 @@ class JSONStreamDatasource(ray.data.read_api.JSONDatasource):
 
     def _read_stream(self, f: "pyarrow.NativeFile", path: str):
         from pyarrow.json import open_json
+        import pyarrow.json as pj
+        import os # 导入 os 模块
 
+        # 在实际读取前，增加一步诊断检查
+        if not os.path.exists(path):
+            # 如果文件路径不存在，立即抛出明确的错误
+            raise FileNotFoundError(
+                f"Ray worker failed to find the file. Path does not exist from worker's perspective: {path}"
+            )
+        if not os.access(path, os.R_OK):
+            # 如果文件不可读，也立即抛出明确的错误
+            import getpass
+            current_user = getpass.getuser()
+            raise PermissionError(
+                f"Ray worker (running as user '{current_user}') does not have read permission for the file: {path}"
+            )
         try:
+            block_size_500MB = 500<<20
+            print(f"arrow_json_args: {self.arrow_json_args}")
+            print(f"read_options: {self.read_options}")
+            read_options = pj.ReadOptions(block_size=block_size_500MB)
             reader = open_json(
                 f,
-                read_options=self.read_options,
+                read_options=read_options,
                 **self.arrow_json_args,
             )
             schema = None
@@ -303,8 +364,20 @@ class JSONStreamDatasource(ray.data.read_api.JSONDatasource):
                     yield table
                 except StopIteration:
                     return
-        except pyarrow.lib.ArrowInvalid as e:
-            raise ValueError(f"Failed to read JSON file: {path}.") from e
+            # 修改这里的异常捕获逻辑
+        except Exception as e:
+            # 捕获所有类型的异常
+            # 构造一个包含原始错误类型和信息的、更详细的错误消息
+            error_type = type(e).__name__
+            error_message = str(e)
+            detailed_error = (
+                f"Failed to read JSON file: {path}. \n"
+                f"Caught by Ray worker. \n"
+                f"Original Error Type: {error_type} \n"
+                f"Original Error Message: {error_message}"
+            )
+            # 重新抛出一个 ValueError，但包含了所有关键信息
+            raise ValueError(detailed_error) from e
 
 
 def read_json_stream(

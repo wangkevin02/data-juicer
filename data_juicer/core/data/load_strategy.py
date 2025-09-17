@@ -199,7 +199,7 @@ class RayLocalJsonDataLoadStrategy(RayDataLoadStrategy):
 
     def load_data(self, **kwargs):
         from data_juicer.core.data.ray_dataset import RayDataset
-
+        
         path = self.ds_config["path"]
 
         # Convert to absolute path if relative

@@ -44,6 +44,7 @@ class ImageDiffusionMapper(Mapper):
         keep_original_sample: bool = True,
         caption_key: Optional[str] = None,
         hf_img2seq: str = "Salesforce/blip2-opt-2.7b",
+        save_dir: str = None,
         *args,
         **kwargs,
     ):
@@ -70,42 +71,31 @@ class ImageDiffusionMapper(Mapper):
             guidance_scale > 1.
         :param aug_num: The image number to be produced by stable-diffusion
             model.
-        :param keep_candidate_mode: retain strategy for the generated
-            $caption_num$ candidates.
-
-            'random_any': Retain the random one from generated captions
-
-            'similar_one_simhash': Retain the generated one that is most
-                similar to the original caption
-
-            'all': Retain all generated captions by concatenation
-
-        Note:
-            This is a batched_OP, whose input and output type are
-            both list. Suppose there are $N$ list of input samples, whose batch
-            size is $b$, and denote caption_num as $M$.
-            The number of total samples after generation is $2Nb$ when
-            keep_original_sample is True and $Nb$ when keep_original_sample is
-            False. For 'random_any' and 'similar_one_simhash' mode,
-            it's $(1+M)Nb$ for 'all' mode when keep_original_sample is True
-            and $MNb$ when keep_original_sample is False.
-
+        :param keep_original_sample: whether to keep the original sample. If
+            it's set to False, there will be only generated captions in the
+            final datasets and the original captions will be removed. It's True
+            by default.
         :param caption_key: the key name of fields in samples to store captions
             for each images. It can be a string if there is only one image in
             each sample. Otherwise, it should be a list. If it's none,
             ImageDiffusionMapper will produce captions for each images.
         :param hf_img2seq: model name on huggingface to generate caption if
             caption_key is None.
+        :param save_dir: The directory where generated image files will be stored.
+            If not specified, outputs will be saved in the same directory as their corresponding input files.
+            This path can alternatively be defined by setting the `DJ_PRODUCED_DATA_DIR` environment variable.
         """
-        kwargs.setdefault("mem_required", "8GB")
+        kwargs["mem_required"] = "8GB" if kwargs.get("mem_required", 0) == 0 else kwargs["mem_required"]
         super().__init__(*args, **kwargs)
         self._init_parameters = self.remove_extra_parameters(locals())
+        self._init_parameters.pop("save_dir", None)
         self.strength = strength
         self.guidance_scale = guidance_scale
         self.aug_num = aug_num
         self.keep_original_sample = keep_original_sample
         self.caption_key = caption_key
         self.prompt = "A photo of a "
+        self.save_dir = save_dir
         if not self.caption_key:
             from .image_captioning_mapper import ImageCaptioningMapper
 
@@ -179,7 +169,7 @@ class ImageDiffusionMapper(Mapper):
             diffusion_image_keys = []
             for index, value in enumerate(loaded_image_keys):
                 related_parameters = self.add_parameters(self._init_parameters, caption=captions[index])
-                diffusion_image_key = transfer_filename(value, OP_NAME, **related_parameters)
+                diffusion_image_key = transfer_filename(value, OP_NAME, self.save_dir, **related_parameters)
                 diffusion_image_keys.append(diffusion_image_key)
                 if diffusion_image_key != value:
                     if not os.path.exists(diffusion_image_key) or diffusion_image_key not in images:

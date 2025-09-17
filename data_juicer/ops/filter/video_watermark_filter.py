@@ -75,7 +75,7 @@ class VideoWatermarkFilter(Filter):
         :param args: extra args
         :param kwargs: extra args
         """
-        kwargs.setdefault("mem_required", "500MB")
+        kwargs["mem_required"] = "500MB" if kwargs.get("mem_required", 0) == 0 else kwargs["mem_required"]
         super().__init__(*args, **kwargs)
         self.prob_threshold = prob_threshold
         if frame_sampling_method not in ["all_keyframes", "uniform"]:
@@ -172,7 +172,7 @@ class VideoWatermarkFilter(Filter):
         if len(itm_probs) <= 0:
             return True
 
-        keep_bools = np.array([itm_prob < self.prob_threshold for itm_prob in itm_probs])
+        keep_bools = np.array([self.get_keep_boolean(itm_prob, None, self.prob_threshold) for itm_prob in itm_probs])
 
         # different strategies
         if self.any:

@@ -80,6 +80,8 @@ class DatasetBuilder(object):
 
         # initialize the data load strategies
         self.load_strategies = []
+        logger.info(f"ds_configs: {ds_configs}")
+        logger.info(f"cfg: {cfg}")
         for ds_config in ds_configs["configs"]:
             # initialize data loading strategy
             data_type = ds_config.get("type", None)
@@ -120,10 +122,26 @@ class DatasetBuilder(object):
             return DatasetBuilder.load_dataset_by_generated_config(self.generated_dataset_config)
 
         _datasets = []
+        if len(self.load_strategies) == 1:
+            multiple_datasets = False
+        else:
+            multiple_datasets = True
         # load datasets with sample numbers
-        for stra, weight, sample_num in zip(self.load_strategies, self.weights, self.sample_numbers):
+        for i, (stra, weight, sample_num) in enumerate(zip(self.load_strategies, self.weights, self.sample_numbers)):
             # load dataset with its load strategy
             dataset = stra.load_data(**kwargs)
+            if multiple_datasets:
+                if i == 0:
+                    tag = 0
+                elif i == 1:
+                    tag = 1
+                else:
+                    raise ValueError(f"Only support two datasets for now")
+                from data_juicer.ops.mapper.python_lambda_mapper import PythonLambdaMapper
+                logger.info(f"Loading dataset {tag} with load strategy {stra}")
+                add_tag_to_example_lambda_str = f"lambda example: {{**example, 'tag': {tag} }}"
+                dataset._run_single_op(PythonLambdaMapper(lambda_str=add_tag_to_example_lambda_str))
+                logger.info(f"Tagged dataset from '{stra.ds_config.get('path')}' with type: '{tag}'")
 
             # do data validation
             for validator in self.validators:
@@ -140,8 +158,12 @@ class DatasetBuilder(object):
             return NestedDataset(concatenate_datasets(_datasets))
         elif self.executor_type == "ray":
             # TODO: support multiple datasets and mixing for ray
-            assert len(_datasets) == 1, "Ray setup only supports one dataset now"
-            return _datasets[0]
+            try:
+                # TODO: concatenate datasets
+                return _datasets[0].union(*_datasets[1:])
+            except Exception as e:
+                logger.error(f"Error concatenating datasets: {e}")
+                raise e
 
     @classmethod
     def load_dataset_by_generated_config(cls, generated_dataset_config):
@@ -198,12 +220,17 @@ def parse_cli_datapath(dataset_path) -> Tuple[List[str], List[float]]:
     :return: list of dataset path and list of weights
     """
     # Handle empty input
-    if not dataset_path or not dataset_path.strip():
-        return [], []
+    if not isinstance(dataset_path, list):
+        if not dataset_path or not dataset_path.strip():
+            return [], []
 
     # Use shlex to properly handle quoted strings
     try:
-        tokens = shlex.split(dataset_path)
+        # tokens = shlex.split(dataset_path)
+        if not isinstance(dataset_path, list):
+            tokens = [dataset_path]
+        else:
+            tokens = dataset_path
     except ValueError as e:
         raise ValueError(f"Invalid dataset path format: {e}")
 

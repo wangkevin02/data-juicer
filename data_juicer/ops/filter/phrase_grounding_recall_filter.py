@@ -148,7 +148,7 @@ class PhraseGroundingRecallFilter(Filter):
         :param args: extra args
         :param kwargs: extra args
         """
-        kwargs.setdefault("mem_required", "1GB")
+        kwargs["mem_required"] = "1GB" if kwargs.get("mem_required", 0) == 0 else kwargs["mem_required"]
         super().__init__(*args, **kwargs)
         self.min_recall = min_recall
         self.max_recall = max_recall
@@ -306,7 +306,7 @@ class PhraseGroundingRecallFilter(Filter):
         if len(recalls) <= 0:
             return True
 
-        keep_bools = np.array([self.min_recall <= recall <= self.max_recall for recall in recalls])
+        keep_bools = np.array([self.get_keep_boolean(recall, self.min_recall, self.max_recall) for recall in recalls])
 
         # different strategies
         if self.any:

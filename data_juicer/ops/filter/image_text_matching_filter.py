@@ -58,7 +58,7 @@ class ImageTextMatchingFilter(Filter):
         :param args: extra args
         :param kwargs: extra args
         """
-        kwargs.setdefault("mem_required", "1500MB")
+        kwargs["mem_required"] = "1500MB" if kwargs.get("mem_required", 0) == 0 else kwargs["mem_required"]
         super().__init__(*args, **kwargs)
         self.min_score = min_score
         self.max_score = max_score
@@ -144,7 +144,9 @@ class ImageTextMatchingFilter(Filter):
         if len(itm_scores) <= 0:
             return True
 
-        keep_bools = np.array([self.min_score <= itm_score <= self.max_score for itm_score in itm_scores])
+        keep_bools = np.array(
+            [self.get_keep_boolean(itm_score, self.min_score, self.max_score) for itm_score in itm_scores]
+        )
 
         # different strategies
         if self.any:

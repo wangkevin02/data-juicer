@@ -3,7 +3,6 @@ from typing import List, Union
 import numpy as np
 from pydantic import PositiveInt
 
-from data_juicer import cuda_device_count
 from data_juicer.utils.constant import Fields, StatsKeys
 from data_juicer.utils.lazy_loader import LazyLoader
 from data_juicer.utils.mm_utils import (
@@ -12,6 +11,7 @@ from data_juicer.utils.mm_utils import (
     load_data_with_context,
     load_video,
 )
+from data_juicer.utils.resource_utils import cuda_device_count
 
 from ..base_op import OPERATORS, UNFORKABLE, Filter
 from ..op_fusion import INTER_SAMPLED_FRAMES, LOADED_VIDEOS
@@ -183,7 +183,10 @@ class VideoOcrAreaRatioFilter(Filter):
     def process_single(self, sample):
         video_ocr_area_ratios = sample[Fields.stats][StatsKeys.video_ocr_area_ratio]
         keep_bools = np.array(
-            [self.min_area_ratio <= ocr_area_ratio <= self.max_area_ratio for ocr_area_ratio in video_ocr_area_ratios]
+            [
+                self.get_keep_boolean(ocr_area_ratio, self.min_area_ratio, self.max_area_ratio)
+                for ocr_area_ratio in video_ocr_area_ratios
+            ]
         )
         if len(keep_bools) <= 0:
             return True
