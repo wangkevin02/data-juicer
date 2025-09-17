@@ -1,0 +1,47 @@
+# global parameters
+project_name: 'dataset-knowledge_instensity-np128'
+dataset:
+  configs:
+      - type: 'local'
+        path: '/apdcephfs_cq8/share_2906397/users/zefeng-h20/text_preprocess/baike_900w/zh_results.jsonl'
+ds_cache_dir: "./ds_cache_dir"
+temp_dir: "./ds_temp_dir"
+text_keys: 'raw_content'   
+export_path: './outputs/filter_map_knowledge_instensity/zh/rule-np128/output.jsonl'
+
+np: 176  # number of subprocess to process your dataset
+open_tracer: true
+
+
+# process schedule
+# a list of several process operators with their arguments
+process:
+  - chinese_convert_mapper:                                 # convert Chinese between Traditional Chinese, Simplified Chinese and Japanese Kanji.
+      mode: 't2s'   
+  - clean_email_mapper:                                     # remove emails from text.
+  - clean_html_mapper:                                      # remove html formats form text.
+  - clean_ip_mapper:                                        # remove ip addresses from text.
+  - clean_links_mapper:                                     # remove web links from text.
+  - fix_unicode_mapper:
+  - punctuation_normalization_mapper:
+  - whitespace_normalization_mapper:
+  - alphanumeric_filter: # 104636381
+      tokenization: false
+      min_ratio: 0.1
+  - average_line_length_filter:  # for code
+      max_len: 3000  # >3sigma (1277)
+  - maximum_line_length_filter:  # for code
+       max_len: 4000  # >3sigma (2017)
+  - character_repetition_filter: # 104630030
+      rep_len: 10
+      max_ratio: 0.6
+  - flagged_words_filter: # 104576967
+      lang: zh
+      tokenization: true
+      use_words_aug: true
+      max_ratio: 0.02
+  - text_length_filter: # 104573711
+       max_len: 58187 
+       min_len: 10
+  - special_characters_filter:
+      max_ratio: 0.6  # > 3sigma (0.303)
